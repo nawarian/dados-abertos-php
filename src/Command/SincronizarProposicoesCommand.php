@@ -4,8 +4,10 @@ declare(strict_types=1);
 
 namespace App\Command;
 
+use App\Entity\AutorProposicao;
 use App\Entity\Proposicao;
 use App\Entity\ProposicaoStatus;
+use App\Repository\AutorProposicaoRepository;
 use App\Repository\ProposicaoRepository;
 use DateTimeImmutable;
 use Symfony\Component\Console\Attribute\AsCommand;
@@ -20,8 +22,11 @@ use Symfony\Component\Console\Output\OutputInterface;
 )]
 class SincronizarProposicoesCommand extends Command
 {
-    public function __construct(private string $cacheDir, private ProposicaoRepository $proposicaoRepository)
-    {
+    public function __construct(
+        private string $cacheDir,
+        private ProposicaoRepository $proposicaoRepository,
+        private AutorProposicaoRepository $autorProposicaoRepository,
+    ) {
         parent::__construct();
     }
 
@@ -34,23 +39,59 @@ class SincronizarProposicoesCommand extends Command
 
     protected function execute(InputInterface $input, OutputInterface $output): int
     {
-        $ano = (int) $input->getArgument('ano');
+        $ano = (int)$input->getArgument('ano');
 
-        $url = "https://dadosabertos.camara.leg.br/arquivos/proposicoes/json/proposicoes-{$ano}.json";
+        $proposicoesUrl = "https://dadosabertos.camara.leg.br/arquivos/proposicoes/json/proposicoes-{$ano}.json";
+        $this->sincronizarProposicoes($this->readFileFromCache($proposicoesUrl));
 
-        $arquivo = basename($url);
-        $arquivoNoCache = "{$this->cacheDir}/{$arquivo}";
+        $autoresProposicoesUrl = "https://dadosabertos.camara.leg.br/arquivos/proposicoesAutores/json/proposicoesAutores-{$ano}.json";
+        $this->sincronizarAutores($this->readFileFromCache($autoresProposicoesUrl));
 
-        if (!file_exists($arquivoNoCache)) {
-            $conteudo = file_get_contents($url);
-            file_put_contents($arquivoNoCache, $conteudo);
+        $this->proposicaoRepository->flush();
+
+        return self::SUCCESS;
+    }
+
+    private function sincronizarAutores(string $json): void
+    {
+        ['dados' => $autores] = json_decode($json, true);
+        foreach ($autores as $autorArray) {
+            $proposicao = $this->proposicaoRepository->find($autorArray['idProposicao']);
+            if ($proposicao === null) {
+                continue;
+            }
+
+            $autor = $this->autorProposicaoRepository->findOneBy([
+                'proposicao' => $autorArray['idProposicao'],
+                'ordemAssinatura' => $autorArray['ordemAssinatura'] ?? null,
+            ]) ?? new AutorProposicao();
+
+            $autor
+                ->setUriProposicao($autorArray['uriProposicao'])
+                ->setIdDeputadoAutor($autorArray['idDeputadoAutor'] ?? null)
+                ->setUriAutor($autorArray['uriAutor'])
+                ->setCodTipoAutor($autorArray['codTipoAutor'])
+                ->setTipoAutor($autorArray['tipoAutor'])
+                ->setNomeAutor($autorArray['nomeAutor'])
+                ->setSiglaPartidoAutor($autorArray['siglaPartidoAutor'])
+                ->setUriPartidoAutor($autorArray['uriPartidoAutor'])
+                ->setSiglaUFAutor($autorArray['siglaUFAutor'])
+                ->setOrdemAssinatura($autorArray['ordemAssinatura'])
+                ->setProponente($autorArray['proponente'])
+            ;
+
+            $proposicao->addAutor($autor);
+
+            $this->proposicaoRepository->save($proposicao);
         }
+    }
 
-        $conteudo = file_get_contents($arquivoNoCache);
+    public function sincronizarProposicoes(bool|string $conteudo): void
+    {
         ['dados' => $proposicoes] = json_decode($conteudo, true);
-
         foreach ($proposicoes as $prop) {
-            $proposicao = (new Proposicao())
+            $proposicao = $this->proposicaoRepository->find($prop['id']) ?? new Proposicao();
+            $proposicao
                 ->setId($prop['id'])
                 ->setUri($prop['uri'])
                 ->setSiglaTipo($prop['siglaTipo'])
@@ -83,12 +124,22 @@ class SincronizarProposicoesCommand extends Command
                         ->setDespacho($prop['ultimoStatus']['despacho'])
                         ->setApreciacao($prop['ultimoStatus']['apreciacao'])
                         ->setUrl($prop['ultimoStatus']['url'])
-                )
-            ;
+                );
 
-            $this->proposicaoRepository->save($proposicao, true);
+            $this->proposicaoRepository->save($proposicao);
+        }
+    }
+
+    public function readFileFromCache(string $url): string|false
+    {
+        $arquivo = basename($url);
+        $arquivoNoCache = "{$this->cacheDir}/{$arquivo}";
+
+        if (!file_exists($arquivoNoCache)) {
+            $conteudo = file_get_contents($url);
+            file_put_contents($arquivoNoCache, $conteudo);
         }
 
-        return self::SUCCESS;
+        return file_get_contents($arquivoNoCache);
     }
 }

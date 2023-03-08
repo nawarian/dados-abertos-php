@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace App\Entity;
 
 use App\Repository\ProposicaoRepository;
+use Doctrine\Common\Collections\ArrayCollection;
+use Doctrine\Common\Collections\Collection;
 use Doctrine\DBAL\Types\Types;
 use Doctrine\ORM\Mapping as ORM;
 
@@ -62,6 +64,14 @@ class Proposicao
 
     #[ORM\Embedded(class: ProposicaoStatus::class)]
     private ?ProposicaoStatus $ultimoStatus = null;
+
+    #[ORM\OneToMany(mappedBy: 'proposicao', targetEntity: AutorProposicao::class, orphanRemoval: true, cascade: ["persist"])]
+    private Collection $autores;
+
+    public function __construct()
+    {
+        $this->autores = new ArrayCollection();
+    }
 
     public function getId(): ?int
     {
@@ -263,6 +273,36 @@ class Proposicao
     public function setUltimoStatus(ProposicaoStatus $ultimoStatus): self
     {
         $this->ultimoStatus = $ultimoStatus;
+
+        return $this;
+    }
+
+    /**
+     * @return Collection<int, AutorProposicao>
+     */
+    public function getAutores(): Collection
+    {
+        return $this->autores;
+    }
+
+    public function addAutor(AutorProposicao $autor): self
+    {
+        if (!$this->autores->contains($autor)) {
+            $this->autores->add($autor);
+            $autor->setProposicao($this);
+        }
+
+        return $this;
+    }
+
+    public function removeAutor(AutorProposicao $autor): self
+    {
+        if ($this->autores->removeElement($autor)) {
+            // set the owning side to null (unless already changed)
+            if ($autor->getProposicao() === $this) {
+                $autor->setProposicao(null);
+            }
+        }
 
         return $this;
     }

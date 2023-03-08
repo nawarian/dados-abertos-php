@@ -39,6 +39,11 @@ class ProposicaoRepository extends ServiceEntityRepository
         }
     }
 
+    public function flush(): void
+    {
+        $this->getEntityManager()->flush();
+    }
+
 //    /**
 //     * @return Proposicao[] Returns an array of Proposicao objects
 //     */
